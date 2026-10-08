@@ -28,6 +28,7 @@ class Result:
     solve_seconds: float
     objective: int
     gaps: int = 0              # จำนวนครั้งที่คุมแบบเว้นคาบกลางวัน (ยิ่งน้อยยิ่งดี)
+    shortfalls: dict | None = None   # session_id -> จำนวนคนที่ยังขาด (โหมดจัดเท่าที่ทำได้)
 
     def is_ok(self) -> bool:
         return self.status in ("OPTIMAL", "FEASIBLE")
@@ -42,10 +43,12 @@ W_GAP = 8                 # penalty ต่อ 1 ช่องว่างกล�
 W_WEEKEND_RANGE = 3       # เกลี่ยวันหยุด ส-อา (S4)
 
 
+W_SHORT = 10_000_000      # penalty ต่อ 1 ที่นั่งที่ขาด — ใหญ่กว่าทุก soft เพื่อให้เติมคนให้มากสุดก่อน
+
 def solve(problem: Problem, time_limit_s: int = 30,
           w_pay: int = W_PAY_RANGE, w_yellow: int = W_YELLOW_RANGE,
           w_total: int = W_TOTAL_RANGE, w_gap: int = W_GAP,
-          w_weekend: int = W_WEEKEND_RANGE) -> Result:
+          w_weekend: int = W_WEEKEND_RANGE, allow_partial: bool = False) -> Result:
     staff = problem.assignable_staff()
     sessions = problem.sessions
     sid = {s.staff_id: s for s in staff}
@@ -64,8 +67,15 @@ def solve(problem: Problem, time_limit_s: int = 30,
         if (st, se) in x:
             m.Add(x[(st, se)] == 1)
 
-    for se in sessions:                              # H1 demand ครบ
-        m.Add(sum(x[(s.staff_id, se.session_id)] for s in staff) == se.demand)
+    short = {}                                       # H1 ต้องการครบ (หรือขาดได้ถ้า allow_partial)
+    for se in sessions:
+        assigned = sum(x[(s.staff_id, se.session_id)] for s in staff)
+        if allow_partial:
+            sh = m.NewIntVar(0, se.demand, f"short_{se.session_id}")
+            m.Add(assigned + sh == se.demand)        # เติมให้มากสุด ที่ขาดไปเก็บใน sh
+            short[se.session_id] = sh
+        else:
+            m.Add(assigned == se.demand)
 
     # ตัวแปรรวมต่อคน (บวก carry เพื่อความแฟร์ข้ามเทอม — A2)
     pay, yq, tot = {}, {}, {}
@@ -118,9 +128,10 @@ def solve(problem: Problem, time_limit_s: int = 30,
             wc = sum(x[(s.staff_id, se.session_id)] for se in we_sessions)
             m.Add(wmin <= wc); m.Add(wmax >= wc)
 
+    short_pen = W_SHORT * sum(short.values()) if short else 0
     m.Minimize(w_pay * (pmax - pmin) + w_yellow * (ymax - ymin)
                + w_total * (tmax - tmin) + w_gap * total_gap
-               + w_weekend * (wmax - wmin))
+               + w_weekend * (wmax - wmin) + short_pen)
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = time_limit_s
@@ -140,9 +151,12 @@ def solve(problem: Problem, time_limit_s: int = 30,
             yv[s.staff_id] = solver.Value(yq[s.staff_id])
             tv[s.staff_id] = solver.Value(tot[s.staff_id])
         gaps = solver.Value(total_gap)
+    sf = None
+    if short and status in ("OPTIMAL", "FEASIBLE"):
+        sf = {se: solver.Value(v) for se, v in short.items() if solver.Value(v) > 0}
     return Result(status, assignments, pv, yv, tv, solver.WallTime(),
                   int(solver.ObjectiveValue()) if status in ("OPTIMAL", "FEASIBLE") else -1,
-                  gaps=gaps)
+                  gaps=gaps, shortfalls=sf)
 
 
 def feasibility_check(problem: Problem) -> tuple[bool, str]:
