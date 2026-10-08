@@ -42,14 +42,14 @@ def _save_tmp(uploaded) -> str:
 # ======== แถบซ้าย: อัปโหลด ========
 with st.sidebar:
     st.header("1️⃣ ไฟล์ข้อมูล")
-    mode = st.radio("วิธีได้ demand", [
+    mode = st.radio("วิธีได้จำนวนที่ต้องการ", [
         "จัดห้องอัตโนมัติ (พบ.>SC1>SC3)",
         "ประเมินจาก section",
         "จากชีทคิว (เช่น ท่าพระจันทร์)"],
-        help="จัดห้อง/ประเมิน = ใช้ตารางสอนรังสิต · จากชีทคิว = อ่าน demand ตรงจากชีทคิว")
+        help="จัดห้อง/ประเมิน = ใช้ตารางสอนรังสิต · จากชีทคิว = อ่านจำนวนที่ต้องการตรงจากชีทคิว")
     need_sched = not mode.startswith("จากชีทคิว")
     f_sched = st.file_uploader("ตารางสอน (.xlsx)", type="xlsx") if need_sched else None
-    f_roster = st.file_uploader("ไฟล์คิว (ดึงรายชื่อ/demand)", type="xlsx")
+    f_roster = st.file_uploader("ไฟล์คิว (ดึงรายชื่อ/จำนวนที่ต้องการ)", type="xlsx")
     exam_type = st.radio("ประเภทสอบ", ["กลางภาค", "ปลายภาค"], horizontal=True)
     et = ExamType.MIDTERM if exam_type == "กลางภาค" else ExamType.FINAL
     campus = st.text_input("ศูนย์", "รังสิต")
@@ -108,7 +108,7 @@ staff: list[Staff] = ss.staff
 avail_staff = [s for s in staff if not s.is_exempt]
 
 tab1, tab2, tab3, tab4 = st.tabs(
-    ["2️⃣ ปรับ demand", "3️⃣ วันไม่ว่าง", "4️⃣ จัดคิว", "5️⃣ ผล & ดาวน์โหลด"])
+    ["2️⃣ ปรับจำนวนที่ต้องการ", "3️⃣ วันไม่ว่าง", "4️⃣ จัดคิว", "5️⃣ ผล & ดาวน์โหลด"])
 
 # ======== แท็บ 2: ปรับ demand ========
 with tab1:
@@ -124,13 +124,38 @@ with tab1:
         s.demand = int(edited.iloc[i]["คนคุมที่ต้องการ"])
     c1, c2, c3 = st.columns(3)
     c1.metric("คาบทั้งหมด", len(sessions))
-    c2.metric("demand รวม (คน-คาบ)", sum(s.demand for s in sessions))
+    c2.metric("ต้องการรวม (คน-คาบ)", sum(s.demand for s in sessions))
     c3.metric("เฉลี่ยคิว/คน", f"{sum(s.demand for s in sessions)/max(len(avail_staff),1):.1f}")
 
 # ======== แท็บ 3: วันไม่ว่าง ========
 with tab2:
     st.subheader("ทำเครื่องหมายคนที่ไม่ว่าง / ขอยกเว้น")
-    st.caption("เลือกคน แล้วเลือกคาบที่เขาคุมไม่ได้ (ลา/ประชุม/ขอยกเว้นรายครั้ง)")
+
+    # ---- โหมดเพิ่มหลายคนทีเดียว (เช่น หลายคนลาคาบเดียวกัน) ----
+    st.markdown("**➕ เพิ่มหลายคนทีเดียว** — เลือกคนหลายคน + คาบที่ทุกคนคุมไม่ได้ แล้วกดเพิ่ม")
+    opts_all = {f"{s.date} {s.slot}": s.session_id for s in sessions}
+    bcol1, bcol2 = st.columns(2)
+    with bcol1:
+        bulk_people = st.multiselect("เจ้าหน้าที่ (เลือกได้หลายคน)", [s.name for s in staff])
+    with bcol2:
+        bulk_slots = st.multiselect("คาบที่ไม่ว่าง (เลือกได้หลายคาบ)", list(opts_all.keys()))
+    bc1, bc2 = st.columns(2)
+    if bc1.button("➕ เพิ่มเป็นไม่ว่าง", disabled=not (bulk_people and bulk_slots)):
+        sids = {opts_all[k] for k in bulk_slots}
+        for nm in bulk_people:
+            stf = next(s for s in staff if s.name == nm)
+            ss.unavail.setdefault(stf.staff_id, set()).update(sids)
+        st.success(f"เพิ่มแล้ว: {len(bulk_people)} คน × {len(bulk_slots)} คาบ")
+    if bc2.button("➖ เอาออกจากไม่ว่าง", disabled=not (bulk_people and bulk_slots)):
+        sids = {opts_all[k] for k in bulk_slots}
+        for nm in bulk_people:
+            stf = next(s for s in staff if s.name == nm)
+            ss.unavail.get(stf.staff_id, set()).difference_update(sids)
+        st.success(f"เอาออกแล้ว: {len(bulk_people)} คน × {len(bulk_slots)} คาบ")
+
+    st.divider()
+    # ---- โหมดรายคน (ละเอียด + ยกเว้นทั้งเทอม) ----
+    st.markdown("**🔎 แก้รายคน** — เลือกคนเดียวเพื่อดู/ปรับละเอียด หรือยกเว้นทั้งเทอม")
     colL, colR = st.columns([1, 2])
     with colL:
         pick = st.selectbox("เลือกเจ้าหน้าที่", [s.name for s in staff])
@@ -140,11 +165,16 @@ with tab2:
         if picked.is_exempt:
             st.info(f"{pick} = ยกเว้นทั้งเทอม (ไม่ถูกจัดเลย)")
         else:
-            opts = {f"{s.date} {s.slot}": s.session_id for s in sessions}
             cur = ss.unavail.get(picked.staff_id, set())
-            chosen = st.multiselect("คาบที่ไม่ว่าง", list(opts.keys()),
-                                    default=[k for k, v in opts.items() if v in cur])
-            ss.unavail[picked.staff_id] = {opts[k] for k in chosen}
+            chosen = st.multiselect("คาบที่ไม่ว่าง", list(opts_all.keys()),
+                                    default=[k for k, v in opts_all.items() if v in cur])
+            ss.unavail[picked.staff_id] = {opts_all[k] for k in chosen}
+
+    # ---- สรุปรายคนที่มีวันไม่ว่าง ----
+    busy = [(next(s.name for s in staff if s.staff_id == sid), len(v))
+            for sid, v in ss.unavail.items() if v]
+    if busy:
+        st.caption("คนที่มีวันไม่ว่าง: " + " · ".join(f"{n}({c})" for n, c in sorted(busy)))
     st.write(f"รวม: ไม่ว่าง {sum(len(v) for v in ss.unavail.values())} ช่อง · "
              f"ยกเว้นทั้งเทอม {sum(1 for s in staff if s.is_exempt)} คน")
 
@@ -163,11 +193,14 @@ with tab3:
     problem = _build_problem()
     ok, msg = feasibility_check(problem)
     (st.success if ok else st.warning)(msg)
+    allow_partial = st.checkbox(
+        "จัดเท่าที่ทำได้ ถ้าคนไม่พอ (ไม่ต้องครบทุกคาบ)", value=not ok,
+        help="เปิดไว้ = ถึงคนไม่พอก็จัดให้มากสุดเท่าที่ทำได้ แล้วบอกว่าคาบไหนยังขาดกี่คน")
     if ss.locks:
         st.info(f"🔒 มีการล็อกไว้ {len(ss.locks)} รายการ (จากแท็บผล) — จะคงไว้ตอนจัด")
     if st.button("🚀 จัดคิว", type="primary"):
         with st.spinner("กำลังจัด..."):
-            ss.result = solve(problem, time_limit_s=time_limit)
+            ss.result = solve(problem, time_limit_s=time_limit, allow_partial=allow_partial)
         r = ss.result
         if r.is_ok():
             pays = [r.pay[s.staff_id] for s in avail_staff]
@@ -177,9 +210,19 @@ with tab3:
             m[1].metric("ส่วนต่างเงิน", max(pays) - min(pays))
             m[2].metric("SD เงิน", f"{statistics.pstdev(pays):.0f}")
             m[3].metric("ช่องว่างกลางวัน", r.gaps, help="ยิ่งน้อยยิ่งดี (คาบติดกัน)")
+            if r.shortfalls:
+                sess_map = {s.session_id: s for s in sessions}
+                total_miss = sum(r.shortfalls.values())
+                lines = "\n".join(
+                    f"• {sess_map[sid].date} {sess_map[sid].slot} — ขาดอีก {n} คน"
+                    for sid, n in sorted(r.shortfalls.items()))
+                st.warning(f"⚠️ จัดเท่าที่ทำได้: ยังขาดรวม {total_miss} คน-คาบ "
+                           f"({len(r.shortfalls)} คาบไม่เต็ม)\n\n{lines}")
+            else:
+                st.info("✅ จัดครบทุกคาบ ไม่มีคาบไหนขาดคน")
         else:
-            st.error(f"จัดไม่ได้ ({r.status}) — คนไม่พอ/ติดเงื่อนไข "
-                     f"(ดูแท็บ demand หรือวันไม่ว่าง)")
+            st.error(f"จัดไม่ได้ ({r.status}) — ลองเปิด 'จัดเท่าที่ทำได้' ด้านบน "
+                     f"หรือดูแท็บ 'ต้องการ'/วันไม่ว่าง")
 
 # ======== แท็บ 5: ผล + ดาวน์โหลด ========
 with tab4:
