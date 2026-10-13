@@ -11,4 +11,4 @@ __all__ = ["Staff", "Session", "Problem", "ExamType", "PayTier",
            "build_sessions", "estimate_sessions", "load_roster", "solve",
            "feasibility_check", "detect_conflicts", "Result",
            "plan_rooms", "RoomPlan", "load_rooms", "allocate_session", "export"]
-__version__ = "1.0.0"
+__version__ = "1.3.0"
