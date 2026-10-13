@@ -20,9 +20,47 @@ from proctor_scheduler.engine import solve, rotate_assign, feasibility_check, de
 from proctor_scheduler.queue_export import build_queue_file
 from proctor_scheduler.excel_io import export
 
-st.set_page_config(page_title="จัดคนคุมสอบ TBS", page_icon="📋", layout="wide")
-st.title("📋 ระบบจัดเจ้าหน้าที่คุมสอบ TBS")
-st.caption("เกลี่ยเงิน/คิวให้แฟร์ด้วย CP-SAT · เจ้าหน้าที่ตรวจและแก้ได้ก่อนใช้จริง")
+st.set_page_config(page_title="จัดเจ้าหน้าที่คุมสอบ TBS", page_icon="📋", layout="wide")
+
+# ======== ธีมสไตล์ Notion (อินดิโก้ + ฟอนต์ไทย + การ์ดลอย) ========
+st.markdown("""
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap">
+<style>
+:root{ --accent:#5b63d3; --accent-ink:#454bc0; --accent-soft:#ecedfb;
+  --bg:#f7f8fb; --surface:#ffffff; --fg:#1f242e; --muted:#687080; --faint:#e7e9f0;
+  --shadow:0 1px 2px rgba(25,28,45,.04),0 3px 10px rgba(25,28,45,.05); }
+html, body, [class*="css"], .stApp, button, input, textarea, select{
+  font-family:"IBM Plex Sans Thai","Sarabun",system-ui,sans-serif !important; }
+.stApp{ background:var(--bg); color:var(--fg); }
+.block-container{ padding-top:2.2rem; max-width:1150px; }
+h1{ font-weight:700 !important; letter-spacing:-.02em; font-size:1.9rem !important; }
+h2,h3{ font-weight:600 !important; letter-spacing:-.01em; }
+section[data-testid="stSidebar"]{ background:var(--surface); border-right:1px solid var(--faint); }
+section[data-testid="stSidebar"] .block-container{ padding-top:1.5rem; }
+.stButton>button, .stDownloadButton>button{
+  border-radius:9px !important; border:1px solid var(--faint) !important; font-weight:600 !important;
+  background:var(--surface); color:var(--fg); box-shadow:var(--shadow); transition:.15s; }
+.stButton>button:hover, .stDownloadButton>button:hover{ border-color:var(--accent) !important; color:var(--accent-ink); }
+.stButton>button[kind="primary"], .stDownloadButton>button[kind="primary"]{
+  background:var(--accent) !important; color:#fff !important; border-color:var(--accent) !important; }
+.stButton>button[kind="primary"]:hover, .stDownloadButton>button[kind="primary"]:hover{ background:var(--accent-ink) !important; }
+[data-testid="stMetric"]{ background:var(--surface); border:1px solid var(--faint); border-radius:12px;
+  padding:14px 16px; box-shadow:var(--shadow); }
+[data-testid="stMetricLabel"]{ color:var(--muted); font-size:.82rem; }
+[data-testid="stMetricValue"]{ font-weight:700; letter-spacing:-.01em; }
+.stTabs [data-baseweb="tab-list"]{ gap:6px; border-bottom:1px solid var(--faint); }
+.stTabs [data-baseweb="tab"]{ border-radius:8px 8px 0 0; padding:8px 16px; font-weight:600; color:var(--muted); }
+.stTabs [aria-selected="true"]{ background:var(--accent-soft); color:var(--accent-ink) !important; }
+[data-testid="stDataFrame"], .stDataFrame{ border-radius:10px; overflow:hidden; border:1px solid var(--faint); box-shadow:var(--shadow); }
+div[data-baseweb="select"]>div, .stTextInput input, .stNumberInput input{ border-radius:8px !important; }
+[data-testid="stExpander"]{ border:1px solid var(--faint) !important; border-radius:10px !important; box-shadow:var(--shadow); }
+[data-testid="stFileUploaderDropzone"]{ border-radius:10px; border:1.5px dashed var(--faint); background:var(--bg); }
+.stAlert{ border-radius:10px; }
+</style>
+""", unsafe_allow_html=True)
+
+st.title("📋 ระบบจัดเจ้าหน้าที่คุมสอบ")
+st.caption("คณะพาณิชยศาสตร์และการบัญชี · เกลี่ยลำดับและค่าตอบแทนให้แฟร์ · ตรวจ–แก้ได้ก่อนใช้จริง")
 
 ss = st.session_state
 ss.setdefault("sessions", None)
@@ -109,7 +147,7 @@ staff: list[Staff] = ss.staff
 avail_staff = [s for s in staff if not s.is_exempt]
 
 tab1, tab2, tab3, tab4 = st.tabs(
-    ["2️⃣ ปรับจำนวนที่ต้องการ", "3️⃣ วันไม่ว่าง", "4️⃣ จัดคิว", "5️⃣ ผล & ดาวน์โหลด"])
+    ["2️⃣ ปรับจำนวนที่ต้องการ", "3️⃣ วันไม่ว่าง", "4️⃣ จัดลำดับ", "5️⃣ สรุป & เผยแพร่"])
 
 # ======== แท็บ 2: ปรับ demand ========
 with tab1:
@@ -181,8 +219,8 @@ with tab2:
 
 # ======== แท็บ 4: จัดคิว ========
 with tab3:
-    st.subheader("จัดคิวอัตโนมัติ")
-    method = st.radio("วิธีจัดคิวคุมสอบ", [
+    st.subheader("จัดลำดับอัตโนมัติ")
+    method = st.radio("วิธีจัดลำดับคุมสอบ", [
         "ก–ฮ หมุนตามลำดับ (วิธีเดิมของคณะ)",
         "CP-SAT เกลี่ยเงิน/คิวให้เท่ากัน"],
         help="ก–ฮ = ไล่ชื่อตามตัวอักษรหมุนวนลงแต่ละห้อง · CP-SAT = คำนวณให้เงินทุกคนเท่ากันที่สุด")
@@ -211,7 +249,7 @@ with tab3:
         help="เปิดไว้ = ถึงคนไม่พอก็จัดให้มากสุดเท่าที่ทำได้ แล้วบอกว่าคาบไหนยังขาดกี่คน")
     if ss.locks:
         st.info(f"🔒 มีการล็อกไว้ {len(ss.locks)} รายการ (จากแท็บผล) — จะคงไว้ตอนจัด")
-    if st.button("🚀 จัดคิว", type="primary"):
+    if st.button("🚀 จัดลำดับ", type="primary"):
         with st.spinner("กำลังจัด..."):
             if use_rotate:
                 ss.result = rotate_assign(problem, ss.allocations, carry_start=carry_start)
@@ -244,20 +282,42 @@ with tab3:
 
 # ======== แท็บ 5: ผล + ดาวน์โหลด ========
 with tab4:
-    st.subheader("ผลการจัด & ดาวน์โหลด")
+    st.subheader("สรุป & เผยแพร่ผลการจัดลำดับ")
     r = ss.result
     if r is None or not r.is_ok():
-        st.info("ยังไม่มีผล — ไปที่แท็บ 'จัดคิว' แล้วกดจัดก่อน")
+        st.info("ยังไม่มีผล — ไปที่แท็บ 'จัดลำดับ' แล้วกดจัดก่อน")
     else:
         rows = []
         for i, s in enumerate(avail_staff, 1):
             sids = set(r.assignments.get(s.staff_id, []))
             y = sum(1 for se in sessions if se.session_id in sids and se.tier == PayTier.YELLOW)
             g = sum(1 for se in sessions if se.session_id in sids and se.tier == PayTier.GREEN)
-            rows.append({"No.": i, "ชื่อ": s.name, "เหลือง": y, "เขียว": g,
-                         "คิวรวม": y + g, "เงิน": y * PAY_YELLOW + g * PAY_GREEN})
+            rows.append({"No.": i, "ชื่อ": s.name, "นอกเวลา": y, "ในเวลา": g,
+                         "รวม": y + g, "เงิน": y * PAY_YELLOW + g * PAY_GREEN})
         dfr = pd.DataFrame(rows)
         mean = dfr["เงิน"].mean()
+
+        # ---- แดชบอร์ด KPI 8 ตัว ----
+        n_days = len({se.date for se in sessions})
+        n_sess = len(sessions)
+        n_staff = len(avail_staff)
+        n_short = len(r.shortfalls or {})
+        total_pay = int(dfr["เงิน"].sum())
+        avg_pay = int(round(total_pay / max(n_staff, 1)))
+        pay_gap = int(dfr["เงิน"].max() - dfr["เงิน"].min())
+        n_yellow = sum(1 for se in sessions if se.tier == PayTier.YELLOW)
+        k1 = st.columns(4)
+        k1[0].metric("จำนวนวันสอบ", n_days)
+        k1[1].metric("จำนวนคาบ", n_sess)
+        k1[2].metric("จำนวนเจ้าหน้าที่", n_staff)
+        k1[3].metric("คาบที่คนไม่พอ", n_short)
+        k2 = st.columns(4)
+        k2[0].metric("งบค่าตอบแทนรวม (฿)", f"{total_pay:,}")
+        k2[1].metric("เฉลี่ย/คน (฿)", f"{avg_pay:,}")
+        k2[2].metric("ส่วนต่างเงิน", pay_gap)
+        k2[3].metric("คาบนอกเวลา", n_yellow)
+        st.write("")
+
         st.dataframe(
             dfr.style.apply(
                 lambda row: ['background-color:#FFC7CE'
