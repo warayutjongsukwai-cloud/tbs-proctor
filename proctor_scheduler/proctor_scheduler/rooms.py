@@ -3,7 +3,7 @@
 กฎ (ยืนยันจากผู้ใช้ 8 ต.ค.):
 - เลือกห้องตามลำดับตึก: คณะพาณิชย์ (พบ.) ก่อน → SC1 → SC-3
 - แต่ละ section = 1 ห้อง (วิชาเล็ก <10 คน รวมกันได้ — ทำใน exams.py)
-- ห้องจุคนสอบ <=65 (A14), คนคุม 2 (<=18) / 3 (19-65) (A13)
+- ห้องจุคนสอบ <=75, คนคุม 2 (<25) / 3 (>=25)
 """
 from __future__ import annotations
 import csv
@@ -42,7 +42,9 @@ def load_rooms(path: str = _DATA, campus: str = "รังสิต") -> list[Ro
         for r in csv.DictReader(f):
             if r["ศูนย์"] != campus:
                 continue
-            cap = int(r["ความจุใช้จริง(cap65)"])
+            # ความจุจริง = ที่นั่งสอบ(÷2) ตัดเพดานด้วย ROOM_STUDENT_CAP (ปัจจุบัน 75)
+            raw = int(r.get("ที่นั่งสอบ(÷2)") or r["ความจุใช้จริง(cap65)"])
+            cap = min(raw, ROOM_STUDENT_CAP)
             b = r["อาคาร"]
             rooms.append(Room(room_id=r["ห้อง"], building=b, floor=r["ชั้น"],
                               capacity=cap, priority=BUILDING_PRIORITY.get(b, 99)))

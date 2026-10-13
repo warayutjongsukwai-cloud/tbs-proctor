@@ -48,7 +48,8 @@ W_SHORT = 10_000_000      # penalty ต่อ 1 ที่นั่งที่�
 def solve(problem: Problem, time_limit_s: int = 30,
           w_pay: int = W_PAY_RANGE, w_yellow: int = W_YELLOW_RANGE,
           w_total: int = W_TOTAL_RANGE, w_gap: int = W_GAP,
-          w_weekend: int = W_WEEKEND_RANGE, allow_partial: bool = False) -> Result:
+          w_weekend: int = W_WEEKEND_RANGE, allow_partial: bool = False,
+          lexicographic: bool = False) -> Result:
     staff = problem.assignable_staff()
     sessions = problem.sessions
     sid = {s.staff_id: s for s in staff}
@@ -128,16 +129,39 @@ def solve(problem: Problem, time_limit_s: int = 30,
             wc = sum(x[(s.staff_id, se.session_id)] for se in we_sessions)
             m.Add(wmin <= wc); m.Add(wmax >= wc)
 
-    short_pen = W_SHORT * sum(short.values()) if short else 0
-    m.Minimize(w_pay * (pmax - pmin) + w_yellow * (ymax - ymin)
-               + w_total * (tmax - tmin) + w_gap * total_gap
-               + w_weekend * (wmax - wmin) + short_pen)
+    short_sum = sum(short.values()) if short else None     # ที่นั่งขาดรวม (โหมด partial)
 
-    solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = time_limit_s
-    solver.parameters.num_search_workers = 8
-    st = solver.Solve(m)
-    status = solver.StatusName(st)
+    def _mk_solver(t):
+        sv = cp_model.CpSolver()
+        sv.parameters.max_time_in_seconds = max(t, 2)
+        sv.parameters.num_search_workers = 8
+        return sv
+
+    if lexicographic:
+        # เกลี่ยแบบไล่ลำดับความสำคัญเป๊ะ: แก้เป้าหมายทีละชั้น ล็อกค่าที่ดีสุดแล้วไปชั้นถัดไป
+        #   (0 เติมคนให้ครบ) > 1 เงินเท่ากัน > 2 เหลือง > 3 คิวรวม > 4 คาบติดกัน > 5 วันหยุด
+        stages = []
+        if short_sum is not None:
+            stages.append(short_sum)
+        stages += [pmax - pmin, ymax - ymin, tmax - tmin, total_gap, wmax - wmin]
+        per = time_limit_s / len(stages)
+        status = "UNKNOWN"
+        for obj in stages:
+            m.Minimize(obj)
+            solver = _mk_solver(per)
+            st = solver.Solve(m)
+            status = solver.StatusName(st)
+            if status not in ("OPTIMAL", "FEASIBLE"):
+                break
+            m.Add(obj <= int(solver.ObjectiveValue()))     # ล็อกชั้นนี้ไว้ แล้วไปชั้นถัดไป
+    else:
+        short_pen = W_SHORT * short_sum if short_sum is not None else 0
+        m.Minimize(w_pay * (pmax - pmin) + w_yellow * (ymax - ymin)
+                   + w_total * (tmax - tmin) + w_gap * total_gap
+                   + w_weekend * (wmax - wmin) + short_pen)
+        solver = _mk_solver(time_limit_s)
+        st = solver.Solve(m)
+        status = solver.StatusName(st)
 
     assignments: dict[str, list[str]] = {s.staff_id: [] for s in staff}
     pv, yv, tv = {}, {}, {}
@@ -197,3 +221,78 @@ def detect_conflicts(problem: Problem, assignments: dict[str, list[str]]) -> lis
             msgs.append(f"🟠 คาบ {se.date} {se.slot}: จัด {cnt[se.session_id]} คน "
                         f"(ต้องการ {se.demand})")
     return msgs
+
+
+def rotate_assign(problem: Problem, allocations: dict | None = None,
+                  carry_start: bool = True) -> Result:
+    """จัด จนท. แบบดั้งเดิม: ไล่ชื่อ ก→ฮ หมุนวนลงแต่ละห้อง/คาบ ตามวันที่ (ยืนยันหัวหน้า).
+
+    - เรียงคาบตามวันที่+ช่วง, เรียง จนท. ตามชื่อ ก→ฮ
+    - แต่ละห้องรับ จนท. ต่อเนื่องตามคิว ข้ามคนที่ไม่ว่าง/ยกเว้น, ไม่ซ้อนคาบ
+    - allocations มี -> จัดราย 'ห้อง' (ตามจำนวนห้องจริง); ไม่มี -> จัดราย 'คาบ' ตาม demand
+    - carry_start=True -> เริ่มหมุนจาก 'คิวต่อจากเทอมก่อน' (คนที่คิวสะสมน้อยสุด) ไม่ใช่เริ่มที่ 'ก' ใหม่
+    """
+    staff = problem.assignable_staff()
+    order = sorted(staff, key=lambda s: s.name)      # ก→ฮ (รหัสยูนิโค้ดไทยเรียงตามพยัญชนะ)
+    n = len(order)
+    unavail = problem.unavailable_map()
+    sessions = sorted(problem.sessions, key=lambda se: (se.date, SLOT_ORDER.get(se.slot, 9)))
+    assignments: dict[str, list[str]] = {s.staff_id: [] for s in staff}
+    # เริ่มหมุนต่อจากเทอมก่อน: คนที่คิวสะสม (carry) น้อยสุด = คิวถัดไป (ก-ฮ แก้เสมอเมื่อเท่ากัน)
+    ptr = 0
+    if carry_start and n:
+        min_carry = min((s.carry_yellow + s.carry_green) for s in order)
+        ptr = next(i for i, s in enumerate(order)
+                   if (s.carry_yellow + s.carry_green) == min_carry)
+
+    def take(need: int, se) -> int:
+        """หยิบ จนท. need คน จากคิวต่อจาก ptr ที่ว่างในคาบนี้และยังไม่โดนจัดในคาบนี้."""
+        nonlocal ptr
+        got = 0
+        tried = 0
+        while got < need and tried < n:
+            cand = order[ptr % n]
+            ptr += 1
+            tried += 1
+            cid = cand.staff_id
+            if se.session_id in unavail.get(cid, set()):
+                continue
+            if se.session_id in assignments[cid]:
+                continue
+            assignments[cid].append(se.session_id)
+            got += 1
+        return got
+
+    for se in sessions:
+        if allocations and se.session_id in allocations:
+            for a in allocations[se.session_id]:      # ทีละห้อง (ตามลำดับตึก)
+                tried0 = 0
+                # จัดห้องนี้ต่อเนื่อง: หยิบทีละคนจนครบ a.proctors
+                for _ in range(a.proctors):
+                    take(1, se)
+        else:
+            take(se.demand, se)                        # ไม่มีผังห้อง -> ตาม demand รายคาบ
+
+    # สรุปเงิน/คิว/เหลือง (บวก carry) ให้รูปแบบตรงกับ CP-SAT
+    pay, yq, tot = {}, {}, {}
+    sess_map = {se.session_id: se for se in problem.sessions}
+    for s in staff:
+        sids = assignments[s.staff_id]
+        y = sum(1 for sid in sids if sess_map[sid].tier == PayTier.YELLOW)
+        pay[s.staff_id] = s.carry_pay + sum(sess_map[sid].pay for sid in sids)
+        yq[s.staff_id] = s.carry_yellow + y
+        tot[s.staff_id] = (s.carry_yellow + s.carry_green) + len(sids)
+
+    # หาคาบที่คนไม่พอ (ขาด)
+    need_map = {}
+    for se in problem.sessions:
+        need_map[se.session_id] = (sum(a.proctors for a in allocations[se.session_id])
+                                   if allocations and se.session_id in allocations else se.demand)
+    got_map = {se.session_id: 0 for se in problem.sessions}
+    for sids in assignments.values():
+        for sid in sids:
+            got_map[sid] += 1
+    sf = {sid: need_map[sid] - got_map[sid] for sid in need_map if got_map[sid] < need_map[sid]}
+
+    return Result("OPTIMAL", assignments, pay, yq, tot, 0.0, 0,
+                  gaps=0, shortfalls=sf or None)

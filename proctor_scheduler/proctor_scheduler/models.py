@@ -2,7 +2,7 @@
 
 ทุกกฎในที่นี้อิงเอกสารวิเคราะห์ (reverse-engineering) ที่ยืนยันจากไฟล์จริง:
 - ค่าตอบแทน 2 ระดับ (A1): เหลือง 300 / เขียว 100
-- เพดาน 65 คนสอบ/ห้อง (A14), คนคุม 2 (<=18) / 3 (19-65) (A13)
+- เพดาน 75 คนสอบ/ห้อง (เกิน 75 แบ่ง 2 ห้อง), คนคุม 2 (<25) / 3 (>=25)
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
@@ -12,10 +12,10 @@ import math
 # ---- ค่าคงที่เชิงกฎ (ปรับได้ที่เดียว) ----
 PAY_YELLOW = 300          # นอกเวลาราชการ (A1)
 PAY_GREEN = 100           # ในเวลาราชการ (A1)
-ROOM_STUDENT_CAP = 65     # เพดานคนสอบต่อห้อง (A14)
-PROCTOR_SMALL_MAX = 18    # <=18 คน -> 2 คนคุม (A13)
+ROOM_STUDENT_CAP = 75     # เพดานคนสอบต่อห้อง — เกิน 75 แบ่ง 2 ห้อง (ยืนยันหัวหน้า)
+PROCTOR_3_MIN = 25        # นศ. >=25 -> 3 คนคุม, ต่ำกว่านั้น -> 2 คน (ยืนยันหัวหน้า)
 PROCTORS_SMALL = 2
-PROCTORS_LARGE = 3        # 19-65 คน -> 3 คนคุม (A13)
+PROCTORS_LARGE = 3
 
 
 class PayTier(str, Enum):
@@ -30,9 +30,9 @@ class ExamType(str, Enum):
 
 
 def proctors_for(n_students: int) -> int:
-    """จำนวนคนคุมตามจำนวนคนสอบจริงในห้อง (กฎ A13)."""
+    """จำนวนคนคุมตามจำนวนคนสอบจริงในห้อง: นศ. >=25 -> 3 คน, ต่ำกว่า -> 2 คน."""
     n = min(n_students, ROOM_STUDENT_CAP)
-    return PROCTORS_SMALL if n <= PROCTOR_SMALL_MAX else PROCTORS_LARGE
+    return PROCTORS_LARGE if n >= PROCTOR_3_MIN else PROCTORS_SMALL
 
 
 def rooms_needed(enrollment: int) -> int:
