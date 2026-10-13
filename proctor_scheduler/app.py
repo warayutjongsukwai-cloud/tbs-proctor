@@ -16,7 +16,8 @@ from proctor_scheduler.models import (Problem, Staff, Session, ExamType, PayTier
 from proctor_scheduler.demand import estimate_sessions
 from proctor_scheduler.planner import plan_rooms
 from proctor_scheduler.staff_io import load_roster
-from proctor_scheduler.engine import solve, feasibility_check, detect_conflicts
+from proctor_scheduler.engine import solve, rotate_assign, feasibility_check, detect_conflicts
+from proctor_scheduler.queue_export import build_queue_file
 from proctor_scheduler.excel_io import export
 
 st.set_page_config(page_title="จัดคนคุมสอบ TBS", page_icon="📋", layout="wide")
@@ -181,7 +182,19 @@ with tab2:
 # ======== แท็บ 4: จัดคิว ========
 with tab3:
     st.subheader("จัดคิวอัตโนมัติ")
-    time_limit = st.slider("เวลาค้นหาสูงสุด (วินาที)", 5, 120, 30)
+    method = st.radio("วิธีจัดคิวคุมสอบ", [
+        "ก–ฮ หมุนตามลำดับ (วิธีเดิมของคณะ)",
+        "CP-SAT เกลี่ยเงิน/คิวให้เท่ากัน"],
+        help="ก–ฮ = ไล่ชื่อตามตัวอักษรหมุนวนลงแต่ละห้อง · CP-SAT = คำนวณให้เงินทุกคนเท่ากันที่สุด")
+    use_rotate = method.startswith("ก–ฮ")
+    time_limit = st.slider("เวลาค้นหาสูงสุด (วินาที) — เฉพาะ CP-SAT", 5, 120, 30,
+                           disabled=use_rotate)
+    if use_rotate:
+        carry_start = st.checkbox("หมุนต่อจากเทอมก่อน (ใช้ยอดยกมา)", value=True,
+                                  help="เปิด = เริ่มคิวจากคนที่คิวสะสมน้อยสุด · ปิด = เริ่มที่ 'ก' ใหม่ทุกเทอม")
+    else:
+        lexico = st.checkbox("เกลี่ยแบบไล่ลำดับเป๊ะ (lexicographic)", value=False,
+                             help="เปิด = รับประกันลำดับ เงิน>เหลือง>คิว>คาบติดกัน>วันหยุด เป๊ะ (ไม่ต้องจูนน้ำหนัก) · อาจช้ากว่าเล็กน้อย")
 
     def _build_problem():
         return Problem(
@@ -200,11 +213,16 @@ with tab3:
         st.info(f"🔒 มีการล็อกไว้ {len(ss.locks)} รายการ (จากแท็บผล) — จะคงไว้ตอนจัด")
     if st.button("🚀 จัดคิว", type="primary"):
         with st.spinner("กำลังจัด..."):
-            ss.result = solve(problem, time_limit_s=time_limit, allow_partial=allow_partial)
+            if use_rotate:
+                ss.result = rotate_assign(problem, ss.allocations, carry_start=carry_start)
+            else:
+                ss.result = solve(problem, time_limit_s=time_limit,
+                                  allow_partial=allow_partial, lexicographic=lexico)
         r = ss.result
         if r.is_ok():
             pays = [r.pay[s.staff_id] for s in avail_staff]
-            st.success(f"สำเร็จ ({r.status}, {r.solve_seconds:.1f}s)")
+            tag = "ก–ฮ หมุนตามลำดับ" if use_rotate else f"CP-SAT, {r.solve_seconds:.1f}s"
+            st.success(f"สำเร็จ ({tag})")
             m = st.columns(4)
             m[0].metric("เงิน ต่ำสุด–สูงสุด", f"{min(pays)}–{max(pays)}")
             m[1].metric("ส่วนต่างเงิน", max(pays) - min(pays))
@@ -308,12 +326,25 @@ with tab4:
                     st.caption(f"สมดุล SC: ไป SC คนละ {min(vals)}–{max(vals)} ครั้ง "
                                f"(เกลี่ยแล้ว — A8)")
 
-        path = f"/tmp/ผลจัดคิว_{campus}_{term.replace('/','-')}.xlsx"
+        _MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        term_tag = term.replace('/', '-')
+
+        # ---- ไฟล์หลัก: ผลจัดคิว (ฟอร์แมตเมทริกซ์ ตรงต้นฉบับคณะ) ----
+        q_path = f"/tmp/ผลจัดคิว_{campus}_{term_tag}.xlsx"
+        build_queue_file(sessions, staff, r.assignments, q_path,
+                         title=f"คิวกรรมการคุมสอบ {campus}  ภาคการศึกษา {term}",
+                         term_label=f"คิวสอบ{exam_type} {term}")
+        with open(q_path, "rb") as f:
+            st.download_button("⬇️ ดาวน์โหลด ผลจัดคิว (ฟอร์แมตคณะ)", f.read(),
+                               file_name=q_path.split("/")[-1], type="primary", mime=_MIME)
+        st.caption("ไฟล์หลัก = เมทริกซ์ คน×คาบ ใส่ 1 ช่องที่คุม + สูตรเหลือง/เขียว/รวม เหมือนไฟล์เดิม")
+
+        # ---- ไฟล์เสริม: ตารางคุมสอบ + สรุป + แผนห้อง ----
+        path = f"/tmp/ตารางคุมสอบ_{campus}_{term_tag}.xlsx"
         export(problem, r, path, title=f"คิวกรรมการคุมสอบ {campus} {term}",
                allocations=ss.allocations)
         nsheet = 3 if ss.allocations else 2
         with open(path, "rb") as f:
-            st.download_button(f"⬇️ ดาวน์โหลด Excel ({nsheet} ชีท)", f.read(),
-                               file_name=path.split("/")[-1], type="primary",
-                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        st.caption("💡 แก้มือได้ในไฟล์ Excel ที่ดาวน์โหลด · เก็บ version เดิมไว้เสมอ ทำ v2 ใหม่")
+            st.download_button(f"⬇️ ดาวน์โหลด ตารางคุมสอบ + แผนห้อง ({nsheet} ชีท)", f.read(),
+                               file_name=path.split("/")[-1], mime=_MIME)
+        st.caption("💡 แก้มือในไฟล์ได้ · เก็บ version เดิมไว้เสมอ ทำ v2 ใหม่")
