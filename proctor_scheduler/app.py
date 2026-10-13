@@ -21,44 +21,6 @@ from proctor_scheduler.queue_export import build_queue_file
 from proctor_scheduler.excel_io import export
 
 st.set_page_config(page_title="จัดเจ้าหน้าที่คุมสอบ TBS", page_icon="📋", layout="wide")
-
-# ======== ธีมสไตล์ Notion (อินดิโก้ + ฟอนต์ไทย + การ์ดลอย) ========
-st.markdown("""
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap">
-<style>
-:root{ --accent:#5b63d3; --accent-ink:#454bc0; --accent-soft:#ecedfb;
-  --bg:#f7f8fb; --surface:#ffffff; --fg:#1f242e; --muted:#687080; --faint:#e7e9f0;
-  --shadow:0 1px 2px rgba(25,28,45,.04),0 3px 10px rgba(25,28,45,.05); }
-html, body, [class*="css"], .stApp, button, input, textarea, select{
-  font-family:"IBM Plex Sans Thai","Sarabun",system-ui,sans-serif !important; }
-.stApp{ background:var(--bg); color:var(--fg); }
-.block-container{ padding-top:2.2rem; max-width:1150px; }
-h1{ font-weight:700 !important; letter-spacing:-.02em; font-size:1.9rem !important; }
-h2,h3{ font-weight:600 !important; letter-spacing:-.01em; }
-section[data-testid="stSidebar"]{ background:var(--surface); border-right:1px solid var(--faint); }
-section[data-testid="stSidebar"] .block-container{ padding-top:1.5rem; }
-.stButton>button, .stDownloadButton>button{
-  border-radius:9px !important; border:1px solid var(--faint) !important; font-weight:600 !important;
-  background:var(--surface); color:var(--fg); box-shadow:var(--shadow); transition:.15s; }
-.stButton>button:hover, .stDownloadButton>button:hover{ border-color:var(--accent) !important; color:var(--accent-ink); }
-.stButton>button[kind="primary"], .stDownloadButton>button[kind="primary"]{
-  background:var(--accent) !important; color:#fff !important; border-color:var(--accent) !important; }
-.stButton>button[kind="primary"]:hover, .stDownloadButton>button[kind="primary"]:hover{ background:var(--accent-ink) !important; }
-[data-testid="stMetric"]{ background:var(--surface); border:1px solid var(--faint); border-radius:12px;
-  padding:14px 16px; box-shadow:var(--shadow); }
-[data-testid="stMetricLabel"]{ color:var(--muted); font-size:.82rem; }
-[data-testid="stMetricValue"]{ font-weight:700; letter-spacing:-.01em; }
-.stTabs [data-baseweb="tab-list"]{ gap:6px; border-bottom:1px solid var(--faint); }
-.stTabs [data-baseweb="tab"]{ border-radius:8px 8px 0 0; padding:8px 16px; font-weight:600; color:var(--muted); }
-.stTabs [aria-selected="true"]{ background:var(--accent-soft); color:var(--accent-ink) !important; }
-[data-testid="stDataFrame"], .stDataFrame{ border-radius:10px; overflow:hidden; border:1px solid var(--faint); box-shadow:var(--shadow); }
-div[data-baseweb="select"]>div, .stTextInput input, .stNumberInput input{ border-radius:8px !important; }
-[data-testid="stExpander"]{ border:1px solid var(--faint) !important; border-radius:10px !important; box-shadow:var(--shadow); }
-[data-testid="stFileUploaderDropzone"]{ border-radius:10px; border:1.5px dashed var(--faint); background:var(--bg); }
-.stAlert{ border-radius:10px; }
-</style>
-""", unsafe_allow_html=True)
-
 st.title("📋 ระบบจัดเจ้าหน้าที่คุมสอบ")
 st.caption("คณะพาณิชยศาสตร์และการบัญชี · เกลี่ยลำดับและค่าตอบแทนให้แฟร์ · ตรวจ–แก้ได้ก่อนใช้จริง")
 
